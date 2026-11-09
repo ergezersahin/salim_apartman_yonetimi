@@ -496,9 +496,7 @@ if st.session_state.kullanici_tipi == "sakin":
     if aktif_duyuru and str(aktif_duyuru).strip() != "":
         st.info(f"📢 **Yönetim Duyurusu:** {aktif_duyuru}")
 
-   # --- EKLENEN GÜNCEL TARİH İBARESİ ---
-    bugun_tarih = datetime.now().strftime("%d.%m.%Y")
-    st.subheader(f"Bölüm {no} - {sak} Borç ve Ödeme Durumu ({bugun_tarih} tarihi itibariyle)") 
+    st.subheader(f"Bölüm {no} - {sak} Borç ve Ödeme Durumu")
     
     bakiye, faiz = daire_borc_hesapla(data, no)
     da = get_config(data, "Daire")
