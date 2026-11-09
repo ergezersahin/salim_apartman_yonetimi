@@ -40,7 +40,6 @@ def verileri_yukle():
             if "Sakinler" not in sheets: 
                 sheets["Sakinler"] = pd.DataFrame([{"No": i, "Ad": "Sakin", "Soyad": str(i), "Sifre": f"123{i}"} for i in range(1, 9)]) 
             else:
-                # Sakinler tablosunda şifre sütunu yoksa ekleyelim
                 if "Sifre" not in sheets["Sakinler"].columns:
                     sheets["Sakinler"]["Sifre"] = [f"123{i}" for i in sheets["Sakinler"]["No"]]
             
@@ -53,7 +52,8 @@ def verileri_yukle():
                     {"Tip": "İşyeri", "Tutar": 250}, 
                     {"Tip": "Devir", "Tutar": 0},
                     {"Tip": "GecikmeFaiziOrani", "Tutar": 5},
-                    {"Tip": "YoneticiSifresi", "Tutar": "sahin2026"} 
+                    {"Tip": "YoneticiSifresi", "Tutar": "sahin2026"},
+                    {"Tip": "AktifDuyuru", "Tutar": "Apartman sakinlerimize önemle duyurulur: Aidatların son ödeme gününe riayet edilmesi rica olunur."} 
                 ]) 
             else:
                 df_ayar = sheets["Ayarlar"]
@@ -62,6 +62,9 @@ def verileri_yukle():
                     sheets["Ayarlar"] = pd.concat([df_ayar, yeni_ayar], ignore_index=True)
                 if not any(df_ayar["Tip"] == "YoneticiSifresi"):
                     yeni_ayar = pd.DataFrame([{"Tip": "YoneticiSifresi", "Tutar": "sahin2026"}])
+                    sheets["Ayarlar"] = pd.concat([df_ayar, yeni_ayar], ignore_index=True)
+                if not any(df_ayar["Tip"] == "AktifDuyuru"):
+                    yeni_ayar = pd.DataFrame([{"Tip": "AktifDuyuru", "Tutar": "Apartman sakinlerimize önemle duyurulur."}])
                     sheets["Ayarlar"] = pd.concat([df_ayar, yeni_ayar], ignore_index=True)
 
             return sheets 
@@ -77,7 +80,8 @@ def verileri_yukle():
             {"Tip": "İşyeri", "Tutar": 250}, 
             {"Tip": "Devir", "Tutar": 0},
             {"Tip": "GecikmeFaiziOrani", "Tutar": 5},
-            {"Tip": "YoneticiSifresi", "Tutar": "sahin2026"}
+            {"Tip": "YoneticiSifresi", "Tutar": "sahin2026"},
+            {"Tip": "AktifDuyuru", "Tutar": "Apartman sakinlerimize önemle duyurulur."}
         ]), 
         "Sakinler": pd.DataFrame([{"No": i, "Ad": "Sakin", "Soyad": str(i), "Sifre": f"123{i}"} for i in range(1, 9)]),
         "Demirbaslar": pd.DataFrame(columns=["Demirbas Adi", "Adet", "Alis Tarihi", "Durumu", "Aciklama"])
@@ -91,12 +95,18 @@ def verileri_kaydet(data_dict):
 def get_config(data, tip): 
     ayarlar = data.get("Ayarlar", pd.DataFrame())
     if ayarlar.empty or "Tip" not in ayarlar.columns:
-        return 0.0 if tip != "YoneticiSifresi" else "sahin2026"
+        if tip == "YoneticiSifresi": return "sahin2026"
+        if tip == "AktifDuyuru": return "Duyuru bulunmamaktadır."
+        return 0.0
     res = ayarlar[ayarlar["Tip"].astype(str).str.contains(tip, case=False, na=False)]
     if res.empty:
-        return 0.0 if tip != "YoneticiSifresi" else "sahin2026"
+        if tip == "YoneticiSifresi": return "sahin2026"
+        if tip == "AktifDuyuru": return "Duyuru bulunmamaktadır."
+        return 0.0
     val = res.iloc[0]["Tutar"]
-    return str(val) if tip == "YoneticiSifresi" else float(pd.to_numeric(val, errors="coerce") or 0)
+    if tip in ["YoneticiSifresi", "AktifDuyuru"]:
+        return str(val)
+    return float(pd.to_numeric(val, errors="coerce") or 0)
 
 def tr_temizle(metin): 
     return str(metin)
@@ -413,13 +423,18 @@ data = verileri_yukle()
 # --- GİRİŞ (LOGIN) EKRANI KONTROLÜ ---
 if "giris_yapildi" not in st.session_state:
     st.session_state.giris_yapildi = False
-    st.session_state.kullanici_tipi = None  # "yonetici" veya "sakin"
+    st.session_state.kullanici_tipi = None 
     st.session_state.daire_no = None
 
 if not st.session_state.giris_yapildi:
     st.title(f"🏢 {APARTMAN_ADI}")
     st.subheader("🔑 Oturum Açma Ekranı")
     
+    # Giriş ekranında da aktif duyuruyu gösterelim ki dışarıdan bakanlar da görsün
+    aktif_duyuru_ilk = get_config(data, "AktifDuyuru")
+    if aktif_duyuru_ilk and str(aktif_duyuru_ilk).strip() != "":
+        st.info(f"📢 **Yönetim Duyurusu:** {aktif_duyuru_ilk}")
+
     tab_yonetici, tab_sakin = st.tabs(["👨‍💼 Yönetici Girişi", "🚪 Daire Sakini Girişi"])
     
     with tab_yonetici:
@@ -439,10 +454,9 @@ if not st.session_state.giris_yapildi:
     with tab_sakin:
         with st.form("sakin_giris_form"):
             secilen_daire = st.selectbox("Daire / Bölüm Seçin", [1, 2, 3, 4, 5, 6, 7, 8])
-            sakin_sifre_input = st.text_input("Daire Şifresi", type="password", help="Varsayılan şifre: 123 + Daire Numarası (Örn: Daire 1 için 1231)")
+            sakin_sifre_input = st.text_input("Daire Şifresi", type="password", help="Varsayılan şifre: 123 + Daire Numarası")
             sakin_submit = st.form_submit_button("Daire Sakini Olarak Giriş Yap")
             if sakin_submit:
-                # Sakinler tablosundan şifre kontrolü
                 sakin_row = data["Sakinler"][data["Sakinler"]["No"] == secilen_daire]
                 kayitli_sifre = f"123{secilen_daire}"
                 if not sakin_row.empty and "Sifre" in sakin_row.columns:
@@ -459,7 +473,7 @@ if not st.session_state.giris_yapildi:
     st.stop()
 
 # ==========================================
-# 1. EĞER GİRİŞ YAPAN DAİRE SAKİNİ İSE (ÖZEL PANEL)
+# 1. EĞER GİRİŞ YAPAN DAİRE SAKİNİ İSE
 # ==========================================
 if st.session_state.kullanici_tipi == "sakin":
     no = st.session_state.daire_no
@@ -469,16 +483,21 @@ if st.session_state.kullanici_tipi == "sakin":
     st.sidebar.title(f"🚪 BÖLÜM {no} PANELİ")
     st.sidebar.write(f"**Sakini:** {sak} ({tur})")
     
-    if st.sidebar.button("🔒 Çıkış Yap", use_container_width=True):
+    if st.sidebar.button("🔒 Oturumu Kapat", use_container_width=True):
         st.session_state.giris_yapildi = False
         st.session_state.kullanici_tipi = None
         st.session_state.daire_no = None
         st.rerun()
 
     st.title(f"🏠 {APARTMAN_ADI}")
+    
+    # Yönetici Duyurusu Gösterimi
+    aktif_duyuru = get_config(data, "AktifDuyuru")
+    if aktif_duyuru and str(aktif_duyuru).strip() != "":
+        st.info(f"📢 **Yönetim Duyurusu:** {aktif_duyuru}")
+
     st.subheader(f"Bölüm {no} - {sak} Borç ve Ödeme Durumu")
     
-    # Borç Hesaplama
     bakiye, faiz = daire_borc_hesapla(data, no)
     da = get_config(data, "Daire")
     ia = get_config(data, "İşyeri")
@@ -519,7 +538,7 @@ if st.session_state.kullanici_tipi == "sakin":
 
 
 # ==========================================
-# 2. EĞER GİRİŞ YAPAN YÖNETİCİ İSE (TAM YETKİLİ PANEL)
+# 2. EĞER GİRİŞ YAPAN YÖNETİCİ İSE
 # ==========================================
 st.sidebar.title("🏢 YÖNETİM PANELİ") 
 st.sidebar.success("👨‍💼 Yönetici olarak giriş yapıldı.")
@@ -532,6 +551,7 @@ menu = st.sidebar.selectbox(
         "📥 Aidat Tahsilatı",
         "💸 Gider Girişi",
         "🛋️ Demirbaş Envanteri",
+        "📢 Duyuru Yönetimi",
         "📄 Raporlar",
         "📋 Kat Malikleri Listesi",
         "📑 Genel Kurul Belgeleri",
@@ -729,6 +749,30 @@ elif menu == "🛋️ Demirbaş Envanteri":
         st.success("Demirbaş envanteri güncellendi!")
         st.rerun()
 
+elif menu == "📢 Duyuru Yönetimi":
+    st.title("📢 Apartman Duyuru Paneli")
+    st.info("Buraya yazacağınız duyuru, daire sakinleri şifreleriyle sisteme giriş yaptıklarında ekranda anında görünecektir.")
+    
+    mevcut_duyuru = get_config(data, "AktifDuyuru")
+    
+    with st.form("duyuru_form"):
+        yeni_duyuru = st.text_area("Daire Sakinlerine İletilecek Duyuru Metni", value=str(mevcut_duyuru), height=150)
+        duyuru_submit = st.form_submit_button("📢 Duyuruyu Yayınla ve Kaydet")
+        
+        if duyuru_submit:
+            ayarlar_df = data["Ayarlar"]
+            # Eğer AktifDuyuru ayarı zaten varsa güncelle, yoksa ekle
+            if any(ayarlar_df["Tip"] == "AktifDuyuru"):
+                ayarlar_df.loc[ayarlar_df["Tip"] == "AktifDuyuru", "Tutar"] = yeni_duyuru
+            else:
+                yeni_satir = pd.DataFrame([{"Tip": "AktifDuyuru", "Tutar": yeni_duyuru}])
+                ayarlar_df = pd.concat([ayarlar_df, yeni_satir], ignore_index=True)
+            
+            data["Ayarlar"] = ayarlar_df
+            verileri_kaydet(data)
+            st.success("✅ Duyuru başarıyla güncellendi ve sakinler için yayına alındı!")
+            st.rerun()
+
 elif menu == "📄 Raporlar": 
     st.title("📄 Finansal Raporlar") 
     st.subheader("🏠 Daire Bazlı Gelir Raporları")
@@ -803,13 +847,23 @@ elif menu == "⚙️ Ayarlar":
             yon_sifre = st.text_input("Yönetici Giriş Şifresi", value=str(get_config(data, "YoneticiSifresi")))
             
             if st.form_submit_button("Ayarları Güncelle"): 
-                data["Ayarlar"] = pd.DataFrame([ 
+                ayarlar_df = data["Ayarlar"]
+                yeni_degerler = [
                     {"Tip": "Daire", "Tutar": d_a}, 
                     {"Tip": "İşyeri", "Tutar": i_a}, 
                     {"Tip": "Devir", "Tutar": dev},
                     {"Tip": "GecikmeFaiziOrani", "Tutar": faiz_or},
                     {"Tip": "YoneticiSifresi", "Tutar": yon_sifre}
-                ]) 
+                ]
+                for item in yeni_degerler:
+                    tip = item["Tip"]
+                    tutar = item["Tutar"]
+                    if any(ayarlar_df["Tip"] == tip):
+                        ayarlar_df.loc[ayarlar_df["Tip"] == tip, "Tutar"] = tutar
+                    else:
+                        ayarlar_df = pd.concat([ayarlar_df, pd.DataFrame([item])], ignore_index=True)
+                
+                data["Ayarlar"] = ayarlar_df
                 verileri_kaydet(data) 
                 st.success("Ayarlar kaydedildi!") 
                 st.rerun() 
@@ -866,7 +920,6 @@ elif menu == "⚙️ Ayarlar":
             st.rerun()
     with t5: 
         st.subheader("👥 Sakin Listesi ve Daire Şifreleri") 
-        st.info("Sakinlerin daire şifrelerini buradan belirleyebilir veya değiştirebilirsiniz.")
         if "Sifre" not in data["Sakinler"].columns:
             data["Sakinler"]["Sifre"] = [f"123{i}" for i in data["Sakinler"]["No"]]
         edited_sakinler = st.data_editor(data["Sakinler"], num_rows="dynamic", use_container_width=True) 
