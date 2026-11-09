@@ -430,7 +430,6 @@ if not st.session_state.giris_yapildi:
     st.title(f"🏢 {APARTMAN_ADI}")
     st.subheader("🔑 Oturum Açma Ekranı")
     
-    # Giriş ekranında da aktif duyuruyu gösterelim ki dışarıdan bakanlar da görsün
     aktif_duyuru_ilk = get_config(data, "AktifDuyuru")
     if aktif_duyuru_ilk and str(aktif_duyuru_ilk).strip() != "":
         st.info(f"📢 **Yönetim Duyurusu:** {aktif_duyuru_ilk}")
@@ -491,12 +490,14 @@ if st.session_state.kullanici_tipi == "sakin":
 
     st.title(f"🏠 {APARTMAN_ADI}")
     
-    # Yönetici Duyurusu Gösterimi
     aktif_duyuru = get_config(data, "AktifDuyuru")
     if aktif_duyuru and str(aktif_duyuru).strip() != "":
         st.info(f"📢 **Yönetim Duyurusu:** {aktif_duyuru}")
 
-    st.subheader(f"Bölüm {no} - {sak} Borç ve Ödeme Durumu")
+    # --- EKLENEN GÜNCEL TARİH İBARESİ ---
+    bugun_tarih = datetime.now().strftime("%d.%m.%Y")
+    st.subheader(f"Bölüm {no} - {sak} - Borç ve Ödeme Durumu")
+    st.caption(f"Rapor Tarihi: {bugun_tarih}")
     
     bakiye, faiz = daire_borc_hesapla(data, no)
     da = get_config(data, "Daire")
@@ -761,7 +762,6 @@ elif menu == "📢 Duyuru Yönetimi":
         
         if duyuru_submit:
             ayarlar_df = data["Ayarlar"]
-            # Eğer AktifDuyuru ayarı zaten varsa güncelle, yoksa ekle
             if any(ayarlar_df["Tip"] == "AktifDuyuru"):
                 ayarlar_df.loc[ayarlar_df["Tip"] == "AktifDuyuru", "Tutar"] = yeni_duyuru
             else:
