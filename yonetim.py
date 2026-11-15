@@ -46,26 +46,28 @@ def verileri_yukle():
             if "Demirbaslar" not in sheets:
                 sheets["Demirbaslar"] = pd.DataFrame(columns=["Demirbas Adi", "Adet", "Alis Tarihi", "Durumu", "Aciklama"])
 
+            varsayilan_ayarlar = [ 
+                {"Tip": "Daire", "Tutar": 500}, 
+                {"Tip": "İşyeri", "Tutar": 250}, 
+                {"Tip": "Devir", "Tutar": 0},
+                {"Tip": "GecikmeFaiziOrani", "Tutar": 5},
+                {"Tip": "YoneticiSifresi", "Tutar": "sahin2026"},
+                {"Tip": "AktifDuyuru", "Tutar": "Apartman sakinlerimize önemle duyurulur: Aidatların son ödeme gününe riayet edilmesi rica olunur."},
+                {"Tip": "ZamAyi", "Tutar": 0},
+                {"Tip": "ZamliDaire", "Tutar": 0},
+                {"Tip": "ZamliIsyeri", "Tutar": 0},
+                {"Tip": "EkOdemeDaire", "Tutar": 0},
+                {"Tip": "EkOdemeIsyeri", "Tutar": 0}
+            ]
+
             if "Ayarlar" not in sheets: 
-                sheets["Ayarlar"] = pd.DataFrame([ 
-                    {"Tip": "Daire", "Tutar": 500}, 
-                    {"Tip": "İşyeri", "Tutar": 250}, 
-                    {"Tip": "Devir", "Tutar": 0},
-                    {"Tip": "GecikmeFaiziOrani", "Tutar": 5},
-                    {"Tip": "YoneticiSifresi", "Tutar": "sahin2026"},
-                    {"Tip": "AktifDuyuru", "Tutar": "Apartman sakinlerimize önemle duyurulur: Aidatların son ödeme gününe riayet edilmesi rica olunur."} 
-                ]) 
+                sheets["Ayarlar"] = pd.DataFrame(varsayilan_ayarlar) 
             else:
                 df_ayar = sheets["Ayarlar"]
-                if not any(df_ayar["Tip"] == "GecikmeFaiziOrani"):
-                    yeni_ayar = pd.DataFrame([{"Tip": "GecikmeFaiziOrani", "Tutar": 5}])
-                    sheets["Ayarlar"] = pd.concat([df_ayar, yeni_ayar], ignore_index=True)
-                if not any(df_ayar["Tip"] == "YoneticiSifresi"):
-                    yeni_ayar = pd.DataFrame([{"Tip": "YoneticiSifresi", "Tutar": "sahin2026"}])
-                    sheets["Ayarlar"] = pd.concat([df_ayar, yeni_ayar], ignore_index=True)
-                if not any(df_ayar["Tip"] == "AktifDuyuru"):
-                    yeni_ayar = pd.DataFrame([{"Tip": "AktifDuyuru", "Tutar": "Apartman sakinlerimize önemle duyurulur."}])
-                    sheets["Ayarlar"] = pd.concat([df_ayar, yeni_ayar], ignore_index=True)
+                for item in varsayilan_ayarlar:
+                    if not any(df_ayar["Tip"] == item["Tip"]):
+                        df_ayar = pd.concat([df_ayar, pd.DataFrame([item])], ignore_index=True)
+                sheets["Ayarlar"] = df_ayar
 
             return sheets 
         except Exception as e: 
@@ -81,7 +83,12 @@ def verileri_yukle():
             {"Tip": "Devir", "Tutar": 0},
             {"Tip": "GecikmeFaiziOrani", "Tutar": 5},
             {"Tip": "YoneticiSifresi", "Tutar": "sahin2026"},
-            {"Tip": "AktifDuyuru", "Tutar": "Apartman sakinlerimize önemle duyurulur."}
+            {"Tip": "AktifDuyuru", "Tutar": "Apartman sakinlerimize önemle duyurulur."},
+            {"Tip": "ZamAyi", "Tutar": 0},
+            {"Tip": "ZamliDaire", "Tutar": 0},
+            {"Tip": "ZamliIsyeri", "Tutar": 0},
+            {"Tip": "EkOdemeDaire", "Tutar": 0},
+            {"Tip": "EkOdemeIsyeri", "Tutar": 0}
         ]), 
         "Sakinler": pd.DataFrame([{"No": i, "Ad": "Sakin", "Soyad": str(i), "Sifre": f"123{i}"} for i in range(1, 9)]),
         "Demirbaslar": pd.DataFrame(columns=["Demirbas Adi", "Adet", "Alis Tarihi", "Durumu", "Aciklama"])
@@ -98,7 +105,9 @@ def get_config(data, tip):
         if tip == "YoneticiSifresi": return "sahin2026"
         if tip == "AktifDuyuru": return "Duyuru bulunmamaktadır."
         return 0.0
-    res = ayarlar[ayarlar["Tip"].astype(str).str.contains(tip, case=False, na=False)]
+    res = ayarlar[ayarlar["Tip"].astype(str) == tip]
+    if res.empty:
+        res = ayarlar[ayarlar["Tip"].astype(str).str.contains(tip, case=False, na=False)]
     if res.empty:
         if tip == "YoneticiSifresi": return "sahin2026"
         if tip == "AktifDuyuru": return "Duyuru bulunmamaktadır."
@@ -119,12 +128,58 @@ def sakin_bilgisi(data, no):
         return f"{ad} {soyad}" 
     return "Sakin"
 
+def dosya_yili_ve_aktif_ay_bul(data):
+    """
+    Excel'deki Gelirler ve Giderler tablolarının tarihine bakarak dosyanın hangi yıla ait olduğunu bulur.
+    - Geçmiş yıllar (2024, 2025 vb.): Yıl tamamlandığı için her zaman 12 ay (6.000 TL) sabitlenir.
+    - İçinde bulunulan yıl (2026): Bulunulan aya kadar (Kasım için 11 ay = 5.500 TL) hesaplanır.
+    """
+    bugun = datetime.now()
+    yillar = []
+
+    for tablo in ["Gelirler", "Giderler"]:
+        if tablo in data and not data[tablo].empty and "Tarih" in data[tablo].columns:
+            t_seri = pd.to_datetime(data[tablo]["Tarih"], errors='coerce').dt.year.dropna()
+            if not t_seri.empty:
+                yillar.extend(t_seri.astype(int).tolist())
+
+    if yillar:
+        dosya_yili = pd.Series(yillar).mode().iloc[0]
+    else:
+        dosya_yili = bugun.year
+
+    # Eğer dosya geçmiş bir yıla aitse (örneğin 2024 veya 2025), 12 ay üzerinden sabit hesapla
+    if dosya_yili < bugun.year:
+        return dosya_yili, 12
+    # İçinde bulunulan yıl (2026) ise o anki aya kadar (Kasım = 11 ay) hesapla
+    else:
+        return dosya_yili, bugun.month
+
+def toplam_odenmesi_gereken_hesapla(data, no):
+    """
+    Normal aidat, yıl içi zam ve ek ödemeleri (ek bütçe) birleştirerek toplam borcu hesaplar.
+    """
+    _, aktif_ay_sayisi = dosya_yili_ve_aktif_ay_bul(data)
+    
+    ilk_aidat = get_config(data, "İşyeri") if no in [7, 8] else get_config(data, "Daire")
+    zam_ayi = int(get_config(data, "ZamAyi"))
+    zamli_aidat = get_config(data, "ZamliIsyeri") if no in [7, 8] else get_config(data, "ZamliDaire")
+
+    # Normal aidat hesaplama
+    if zam_ayi <= 1 or zam_ayi > 12 or zamli_aidat <= 0 or aktif_ay_sayisi < zam_ayi:
+        normal_aidat_toplam = ilk_aidat * aktif_ay_sayisi
+    else:
+        eski_tarife_ay_sayisi = zam_ayi - 1
+        yeni_tarife_ay_sayisi = aktif_ay_sayisi - eski_tarife_ay_sayisi
+        normal_aidat_toplam = (ilk_aidat * eski_tarife_ay_sayisi) + (zamli_aidat * yeni_tarife_ay_sayisi)
+        
+    # Ek Ödeme / Ek Bütçe eklemesi
+    ek_odeme = get_config(data, "EkOdemeIsyeri") if no in [7, 8] else get_config(data, "EkOdemeDaire")
+    
+    return normal_aidat_toplam + ek_odeme
+
 def daire_borc_hesapla(data, no): 
-    da = get_config(data, "Daire") 
-    ia = get_config(data, "İşyeri") 
-    ay_sayisi = datetime.now().month 
-    birim_aidat = ia if no in [7, 8] else da 
-    toplam_borc = birim_aidat * ay_sayisi 
+    toplam_borc = toplam_odenmesi_gereken_hesapla(data, no)
     
     odenen = pd.to_numeric(data["Gelirler"][data["Gelirler"]["No"] == no]["Miktar"], errors="coerce").sum() 
     anapara_bakiye = odenen - toplam_borc 
@@ -138,13 +193,9 @@ def daire_borc_hesapla(data, no):
 
 def aidat_durum_tablosu_olustur(data):
     aidat_durumu = []
-    daire_aidati = get_config(data, "Daire")
-    isyeri_aidati = get_config(data, "İşyeri")
-    ay_sayisi = datetime.now().month
 
     for no in range(1, 9):
-        birim_aidati = isyeri_aidati if no in [7, 8] else daire_aidati
-        toplam_borc = birim_aidati * ay_sayisi
+        toplam_borc = toplam_odenmesi_gereken_hesapla(data, no)
         odenen = pd.to_numeric(data["Gelirler"][data["Gelirler"]["No"] == no]["Miktar"], errors="coerce").sum() 
         
         kalan_anapara = toplam_borc - odenen
@@ -243,7 +294,7 @@ def tek_daire_pdf_olustur(data, no):
         t = row['Tarih'].strftime('%d.%m.%Y') 
         m = float(row['Miktar']) 
         pdf.cell(45, 10, t, 1, 0, 'C') 
-        pdf.cell(95, 10, "Aidat Tahsilatı", 1, 0, 'L') 
+        pdf.cell(95, 10, "Aidat / Ödeme Tahsilatı", 1, 0, 'L') 
         pdf.cell(50, 10, f"{m:,.2f}", 1, 1, 'R') 
         toplam += m 
     pdf.ln(2) 
@@ -494,17 +545,12 @@ if st.session_state.kullanici_tipi == "sakin":
     if aktif_duyuru and str(aktif_duyuru).strip() != "":
         st.info(f"📢 **Yönetim Duyurusu:** {aktif_duyuru}")
 
-    # --- EKLENEN GÜNCEL TARİH İBARESİ ---
     bugun_tarih = datetime.now().strftime("%d.%m.%Y")
     st.subheader(f"Bölüm {no} - {sak} - Borç ve Ödeme Durumu")
     st.caption(f"Rapor Tarihi: {bugun_tarih}")
     
     bakiye, faiz = daire_borc_hesapla(data, no)
-    da = get_config(data, "Daire")
-    ia = get_config(data, "İşyeri")
-    ay_sayisi = datetime.now().month
-    birim_aidat = ia if no in [7, 8] else da
-    toplam_borc = birim_aidat * ay_sayisi
+    toplam_borc = toplam_odenmesi_gereken_hesapla(data, no)
     odenen_toplam = pd.to_numeric(data["Gelirler"][data["Gelirler"]["No"] == no]["Miktar"], errors="coerce").sum()
     
     col1, col2, col3 = st.columns(3)
@@ -562,6 +608,9 @@ menu = st.sidebar.selectbox(
 
 if menu == "📊 Genel Özet": 
     st.title(APARTMAN_ADI) 
+    dosya_yili, hesaplanan_ay = dosya_yili_ve_aktif_ay_bul(data)
+    st.caption(f"📅 Dosya Dönemi: **{dosya_yili} Yılı** ({hesaplanan_ay} Aylık Hesaplama)")
+
     devir = get_config(data, "Devir") 
     gelir = pd.to_numeric(data["Gelirler"]["Miktar"], errors='coerce').sum() 
     gider = pd.to_numeric(data["Giderler"]["Miktar"], errors='coerce').sum() 
@@ -664,7 +713,15 @@ elif menu == "📥 Aidat Tahsilatı":
         
     with st.form("t_makbuz_form"): 
         no = st.selectbox("Bölüm Seçin", [1,2,3,4,5,6,7,8]) 
-        varsayilan_aidat = get_config(data, "İşyeri") if no in [7, 8] else get_config(data, "Daire")
+        
+        # Güncel aya göre varsayılan aidatı belirle
+        zam_ayi = int(get_config(data, "ZamAyi"))
+        zamli_aidat = get_config(data, "ZamliIsyeri") if no in [7, 8] else get_config(data, "ZamliDaire")
+        normal_aidat = get_config(data, "İşyeri") if no in [7, 8] else get_config(data, "Daire")
+        if zam_ayi > 1 and datetime.now().month >= zam_ayi and zamli_aidat > 0:
+            varsayilan_aidat = zamli_aidat
+        else:
+            varsayilan_aidat = normal_aidat
         
         miktar = st.number_input("Tutar (TL)", min_value=0.0, value=float(varsayilan_aidat)) 
         tarih = st.date_input("İşlem Tarihi", value=datetime.now().date(), format="DD/MM/YYYY") 
@@ -688,7 +745,7 @@ elif menu == "📥 Aidat Tahsilatı":
             
             bakiye, faiz = daire_borc_hesapla(data, no) 
             if bakiye >= 0: 
-                pdf.cell(190, 10, txt=tr_temizle("Açıklama: Aidat Tahsilatı. Geçmiş borcunuz bulunmamaktadır."), ln=True) 
+                pdf.cell(190, 10, txt=tr_temizle("Açıklama: Tahsilat İşlemi. Borcunuz bulunmamaktadır."), ln=True) 
             else: 
                 pdf.cell(190, 10, txt=tr_temizle(f"Kalan Anapara Borcunuz: {-bakiye:,.2f} TL, Faiz: {faiz:,.2f} TL"), ln=True) 
                 
@@ -846,6 +903,34 @@ elif menu == "⚙️ Ayarlar":
             faiz_or = st.number_input("Aylık Gecikme Faizi Oranı (%)", value=float(get_config(data, "GecikmeFaiziOrani")))
             yon_sifre = st.text_input("Yönetici Giriş Şifresi", value=str(get_config(data, "YoneticiSifresi")))
             
+            st.markdown("---")
+            st.subheader("📢 Ek Ödeme / Ek Bütçe (Örn: Çatı Onarımı, Boya vb.)")
+            st.caption("Yıl içinde ekstra alınması kararlaştırılan ek aidat tutarlarını buraya yazabilirsiniz. Ek ödeme yoksa 0 bırakın.")
+            ek_d = st.number_input("Daire Başına Ek Ödeme (TL)", value=float(get_config(data, "EkOdemeDaire")))
+            ek_i = st.number_input("İşyeri Başına Ek Ödeme (TL)", value=float(get_config(data, "EkOdemeIsyeri")))
+
+            st.markdown("---")
+            st.subheader("📈 Yıl İçi Aidat Değişikliği (Opsiyonel - Örn: Temmuz Zammı)")
+            st.caption("Yıl ortasında aidat değişirse hangi aydan itibaren geçerli olacağını seçin. Değişiklik yoksa '0 (Zam Yok)' bırakın.")
+            ay_secenekleri = {
+                0: "0 - Yıl İçi Zam Yok",
+                2: "2 - Şubat", 3: "3 - Mart", 4: "4 - Nisan",
+                5: "5 - Mayıs", 6: "6 - Haziran", 7: "7 - Temmuz",
+                8: "8 - Ağustos", 9: "9 - Eylül", 10: "10 - Ekim",
+                11: "11 - Kasım", 12: "12 - Aralık"
+            }
+            mevcut_zam_ayi = int(get_config(data, "ZamAyi"))
+            if mevcut_zam_ayi not in ay_secenekleri:
+                mevcut_zam_ayi = 0
+            zam_ayi_secim = st.selectbox(
+                "Zam Başlangıç Ayı", 
+                options=list(ay_secenekleri.keys()), 
+                format_func=lambda x: ay_secenekleri[x],
+                index=list(ay_secenekleri.keys()).index(mevcut_zam_ayi)
+            )
+            zamli_d = st.number_input("Zamlı Daire Aidatı (TL)", value=float(get_config(data, "ZamliDaire")))
+            zamli_i = st.number_input("Zamlı İşyeri Aidatı (TL)", value=float(get_config(data, "ZamliIsyeri")))
+            
             if st.form_submit_button("Ayarları Güncelle"): 
                 ayarlar_df = data["Ayarlar"]
                 yeni_degerler = [
@@ -853,7 +938,12 @@ elif menu == "⚙️ Ayarlar":
                     {"Tip": "İşyeri", "Tutar": i_a}, 
                     {"Tip": "Devir", "Tutar": dev},
                     {"Tip": "GecikmeFaiziOrani", "Tutar": faiz_or},
-                    {"Tip": "YoneticiSifresi", "Tutar": yon_sifre}
+                    {"Tip": "YoneticiSifresi", "Tutar": yon_sifre},
+                    {"Tip": "ZamAyi", "Tutar": zam_ayi_secim},
+                    {"Tip": "ZamliDaire", "Tutar": zamli_d},
+                    {"Tip": "ZamliIsyeri", "Tutar": zamli_i},
+                    {"Tip": "EkOdemeDaire", "Tutar": ek_d},
+                    {"Tip": "EkOdemeIsyeri", "Tutar": ek_i}
                 ]
                 for item in yeni_degerler:
                     tip = item["Tip"]
@@ -865,7 +955,7 @@ elif menu == "⚙️ Ayarlar":
                 
                 data["Ayarlar"] = ayarlar_df
                 verileri_kaydet(data) 
-                st.success("Ayarlar kaydedildi!") 
+                st.success("Ayarlar ve Ek Ödeme bilgileri kaydedildi!") 
                 st.rerun() 
     with t2: 
         st.subheader("📥 Tüm Tahsilatlar") 
